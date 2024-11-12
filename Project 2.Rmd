@@ -482,7 +482,7 @@ stationary_locations <- data.frame(
   latitude = c(46.88527, 46.88590)
 )
 
-# Common transit points, replace with actual points if available
+# Common transit points
 common_points <- data.frame(
   longitude = c(-114.0003, -114.0004, -114.0005),
   latitude = c(46.88678, 46.88690, 46.88695)
