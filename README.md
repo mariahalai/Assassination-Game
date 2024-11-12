@@ -13,7 +13,7 @@ Ensure you have the following R packages installed:
 To install these, run the following command in R:
 install.packages(c("dplyr", "lubridate", "geosphere"))
 
-### How It Works
+### How It Works-- The algorithm to test is at the bottom. 
 The algorithm follows these main steps:
 
 Calculate Bomb Time: Determines mid-transit time, offset by 5 minutes to avoid early fluctuations.
