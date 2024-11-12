@@ -66,7 +66,7 @@ ggplot(gps_data, aes(x = longitude,
   theme_minimal()
 ```
 1.2. Analyze Speed Over Time
-Understanding speed patterns helps identify periods of transit (when the user is moving) versus stationary periods. We’ll plot speed over time for each day to see if there are recurring patterns.
+
 ```{r}
 ggplot(gps_data, aes(x = time, 
                      y = speed, 
@@ -88,10 +88,8 @@ ggplot(gps_data, aes(x = time,
 1.3. Identify Stationary Periods and Calculate Movement Duration and Transit Periods
 
 1. Identify Movement and Stationary Data:
-- Calculate daily total movement time and total stationary time to get a sense of typical daily transit patterns.
-
 2. Find Stationary Periods of 2+ Minutes:
-- Identify any stationary periods lasting 2 minutes or more as "safe zones."
+
 ```{r}
 library(jsonlite)
 library(dplyr)
@@ -129,7 +127,7 @@ print(stationary_periods)
 
 
 1.4. Visualize Transit and Stationary Times
-To further analyze patterns, let’s visualize the distribution of transit and stationary times.
+
 ```{r}
 ggplot(time_summary, aes(x = day_label)) +
   geom_bar(aes(y = total_movement_time, 
@@ -150,7 +148,6 @@ Step 1: Analyze Start and End Times for Transit Periods
 
 Goal: Determine if there’s a consistent daily pattern for when the target starts moving and when transit typically ends.
 
-Action: Run the following code to get average start and end times for each transit period.
 ```{r}
 transit_summary <- gps_data %>%
   filter(status == "Moving") %>%
@@ -165,9 +162,7 @@ print(transit_summary)
 
 Step 2: Examine the Relationship Between Speed and Transit Duration
 
-Goal: Determine if longer transit periods correspond to higher speeds, which may indicate faster routes or different transit modes.
-
-Action: Run the following code to calculate and visualize the relationship between speed and transit duration.
+Goal: Determine if longer transit periods correspond to higher speeds, which may indicate faster routes or different transit modes
 
 ```{r}
 transit_speed_summary <- gps_data %>%
@@ -190,9 +185,8 @@ ggplot(transit_speed_summary,
 ```
 
 Step 3: Identify Stationary “Safe Zones”
-Goal: Pinpoint locations where stationary periods frequently occur, creating “safe zones” to avoid for bombing attempts.
+Goal: Pinpoint locations where stationary periods frequently occur, creating “safe zones” to avoid bombing attempts
 
-Action: Use the following code to find locations (latitude and longitude) where stationary periods of 2+ minutes frequently occur.
 ```{r}
 library(dplyr)
 
@@ -245,6 +239,7 @@ clusters <- kmeans(coordinates,
 transit_locations$cluster <- clusters$cluster
 ```
 
+TEMPERATURE DATA ADDED
 
 ```{r}
 gps_data$date <- as.Date(gps_data$time)  
@@ -275,7 +270,7 @@ gps_data <- gps_data %>%
 
 head(gps_data)
 ```
-
+TEMPERATURE VS SPEED
 ```{r}
 speed_temp_analysis <- gps_data %>%
   group_by(date) %>%
@@ -328,7 +323,7 @@ print("Transit times for each day:")
 print(transit_times)
 
 ```
-Step 1: Calculate Most Frequent Start Times for Movement
+Step 1: Calculate the Most Frequent Start Times for Movement
 Use the GPS data from the first two weeks to find the most frequent or average start time for movement. This would be the earliest time of day that the target begins moving.
 ```{r}
 movement_start_summary <- gps_data %>%
@@ -364,8 +359,7 @@ movement_duration_summary <- gps_data %>%
 
 print(movement_duration_summary)
 ```
-
-
+CALCULATING DISTANCE 
 ```{r}
 if (!requireNamespace("fields", quietly = TRUE)) {
   install.packages("fields")
@@ -382,7 +376,7 @@ calculate_distance <- function(predicted_location,
   return(dist * 1000)  
 }
 ```
-
+FINAL ALGORITHM!!!!! --- Try your attempts here 
 
 ```{r}
 # These libraries are required for data manipulation, date handling, and geographic calculations
