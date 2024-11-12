@@ -1,0 +1,503 @@
+---
+title: "Project 2"
+author: "Maria Halai"
+date: "2024-11-08"
+output: html_document
+---
+```{r}
+library(jsonlite)
+library(dplyr)
+library(ggplot2)
+
+path <- "/Users/mariahalai/Desktop/gps/"
+files <- list.files(path, pattern = "*.geojson", 
+                    full.names = TRUE)
+
+data_frames <- list()
+for (i in seq_along(files)) {
+  file <- files[i]
+  dat <- fromJSON(file)
+  records <- data.frame(
+    file = basename(file),
+    day_label = paste("Day", i), 
+    time = dat$features$properties$time,
+    time_long = dat$features$properties$time_long,
+    provider = dat$features$properties$provider,
+    accuracy = dat$features$properties$accuracy,
+    altitude = dat$features$properties$altitude,
+    bearing = dat$features$properties$bearing,
+    speed = dat$features$properties$speed,
+    longitude = sapply(dat$features$geometry$coordinates, 
+                       function(coord) coord[1]),
+    latitude = sapply(dat$features$geometry$coordinates, 
+                      function(coord) coord[2])
+  )
+  data_frames[[i]] <- records
+}
+
+gps_data <- bind_rows(data_frames)
+gps_data$time <- as.POSIXct(gps_data$time, 
+                            format="%Y-%m-%dT%H:%M:%OSZ", 
+                            tz="UTC")
+
+gps_data <- gps_data %>%
+  mutate(day_label = factor(day_label, 
+                            levels = paste("Day", 1:11)))
+
+head(gps_data)
+```
+
+1.1. Visualize the GPS Path (Latitude vs. Longitude)
+This plot will show the routes taken each day based on GPS coordinates.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+ggplot(gps_data, aes(x = longitude, 
+                     y = latitude, 
+                     color = day_label)) +
+  geom_point(alpha = 0.5, 
+             size = 1) +
+  labs(title = "GPS Paths Over Two Weeks by Day", 
+       x = "Longitude", 
+       y = "Latitude", 
+       color = "Day") +
+  theme_minimal()
+```
+1.2. Analyze Speed Over Time
+Understanding speed patterns helps identify periods of transit (when the user is moving) versus stationary periods. We’ll plot speed over time for each day to see if there are recurring patterns.
+```{r}
+ggplot(gps_data, aes(x = time, 
+                     y = speed, 
+                     color = day_label)) +
+  geom_line(alpha = 0.7) +
+  geom_point(data = subset(gps_data, 
+                           speed == 0), 
+             aes(x = time, 
+                 y = speed), 
+             color = "red", 
+             size = 1.5, 
+             alpha = 0.6) +
+  labs(title = "Speed Over Time with Stationary Periods Highlighted", 
+       x = "Time", 
+       y = "Speed (m/s)", color = "Day") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+1.3. Identify Stationary Periods and Calculate Movement Duration and Transit Periods
+
+1. Identify Movement and Stationary Data:
+- Calculate daily total movement time and total stationary time to get a sense of typical daily transit patterns.
+
+2. Find Stationary Periods of 2+ Minutes:
+- Identify any stationary periods lasting 2 minutes or more as "safe zones."
+```{r}
+library(jsonlite)
+library(dplyr)
+library(tidyr)
+
+gps_data <- gps_data %>%
+  mutate(status = ifelse(is.na(speed) | speed == 0, "Stationary", "Moving"))
+
+time_summary <- gps_data %>%
+  group_by(day_label, status) %>%
+  summarize(total_time = n()) %>%
+  pivot_wider(names_from = status, values_from = total_time, 
+              values_fill = 0) %>%
+  rename(total_movement_time = Moving, 
+         total_stationary_time = Stationary)
+
+stationary_periods <- gps_data %>%
+  arrange(day_label, time) %>%  
+  group_by(day_label) %>%
+  mutate(
+    stationary_period = cumsum(ifelse(status == "Stationary" & lag(status, 
+                                                                   default = "Moving") == "Moving", 1, 0))
+  ) %>%
+  group_by(day_label, stationary_period) %>%
+  filter(status == "Stationary") %>%
+  summarize(stationary_duration = n()) %>%
+  filter(stationary_duration >= 10) %>%
+  ungroup() %>%
+  select(day_label, stationary_period, 
+         stationary_duration)
+
+print(time_summary)
+print(stationary_periods)
+```
+
+
+1.4. Visualize Transit and Stationary Times
+To further analyze patterns, let’s visualize the distribution of transit and stationary times.
+```{r}
+ggplot(time_summary, aes(x = day_label)) +
+  geom_bar(aes(y = total_movement_time, 
+               fill = "Transit"), 
+           stat = "identity", 
+           alpha = 0.6) +
+  geom_bar(aes(y = total_stationary_time, 
+               fill = "Stationary"), 
+           stat = "identity", 
+           alpha = 0.6) +
+  labs(title = "Transit vs. Stationary Time Per Day", 
+       x = "Day", y = "Time Points") +
+  scale_fill_manual(values = c("Transit" = "blue", "Stationary" = "red"), 
+                    name = "Time Type") +
+  theme_minimal()
+```
+Step 1: Analyze Start and End Times for Transit Periods
+
+Goal: Determine if there’s a consistent daily pattern for when the target starts moving and when transit typically ends.
+
+Action: Run the following code to get average start and end times for each transit period.
+```{r}
+transit_summary <- gps_data %>%
+  filter(status == "Moving") %>%
+  group_by(day_label) %>%
+  summarize(
+    avg_start_time = min(time),
+    avg_end_time = max(time)
+  )
+print("Transit Start and End Times by Day:")
+print(transit_summary)
+```
+
+Step 2: Examine the Relationship Between Speed and Transit Duration
+
+Goal: Determine if longer transit periods correspond to higher speeds, which may indicate faster routes or different transit modes.
+
+Action: Run the following code to calculate and visualize the relationship between speed and transit duration.
+
+```{r}
+transit_speed_summary <- gps_data %>%
+  filter(status == "Moving") %>%
+  group_by(day_label) %>%
+  summarize(
+    avg_speed = mean(speed, na.rm = TRUE),
+    transit_duration = n()
+  )
+
+ggplot(transit_speed_summary, 
+       aes(x = transit_duration, y = avg_speed)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Relationship Between Transit Duration and Average Speed",
+       x = "Transit Duration (Time Points)",
+       y = "Average Speed (m/s)") +
+  theme_minimal()
+
+```
+
+Step 3: Identify Stationary “Safe Zones”
+Goal: Pinpoint locations where stationary periods frequently occur, creating “safe zones” to avoid for bombing attempts.
+
+Action: Use the following code to find locations (latitude and longitude) where stationary periods of 2+ minutes frequently occur.
+```{r}
+library(dplyr)
+
+gps_data <- gps_data %>%
+  arrange(file, time) %>%
+  group_by(file) %>%
+  mutate(
+    stationary_period = ifelse(status == "Stationary" & 
+                                 (lag(status, default = "Moving") != "Stationary"), 
+                               cumsum(status == "Stationary"), NA)
+  ) %>%
+  fill(stationary_period, .direction = "down") 
+
+stationary_periods <- gps_data %>%
+  filter(status == "Stationary" & !is.na(stationary_period)) %>%
+  group_by(file, stationary_period) %>%
+  summarize(stationary_duration = n(), .groups = "drop") %>%
+  filter(stationary_duration >= 10)  
+
+gps_data <- gps_data %>%
+  left_join(stationary_periods, by = c("file", "stationary_period"))
+
+stationary_locations <- gps_data %>%
+  filter(status == "Stationary" & !is.na(stationary_duration)) %>%
+  group_by(latitude, longitude) %>%
+  summarize(stationary_count = n(), .groups = "drop") %>%
+  arrange(desc(stationary_count))
+
+head(stationary_locations)
+```
+
+```{r}
+transit_locations <- gps_data %>%
+  filter(status == "Moving") %>%
+  group_by(longitude, latitude) %>%
+  summarize(transit_count = n()) %>%
+  arrange(desc(transit_count)) %>%
+  ungroup()
+
+print(head(transit_locations))
+
+library(stats)
+
+coordinates <- transit_locations %>% select(longitude, latitude)
+set.seed(123) 
+k_clusters <- 5 
+clusters <- kmeans(coordinates, 
+                   centers = k_clusters)
+
+transit_locations$cluster <- clusters$cluster
+```
+
+
+```{r}
+gps_data$date <- as.Date(gps_data$time)  
+
+unique_dates <- unique(gps_data$date)
+
+print("Dates with available GPS data:")
+print(unique_dates)
+```
+
+Adding in Temperature data
+```{r}
+temperature_data <- data.frame(
+  date = as.Date(c("2020-08-18", "2020-08-19", "2020-08-20", 
+                   "2020-08-21", "2020-08-22", "2020-08-24", 
+                   "2020-08-25", "2020-08-26", "2020-08-27", 
+                   "2020-08-28", "2020-08-31")),
+  max_temp = c(91, 91, 82, 94, 85, 83, 75, 87, 87, 86, 58),
+  min_temp = c(65, 61, 57, 49, 56, 53, 50, 49, 52, 46, 46),
+  avg_temp = c(78, 76, 69.5, 71.5, 70.5, 68, 62.5, 68, 69.5, 66, 52)
+)
+
+gps_data$date <- as.Date(gps_data$time)
+
+gps_data <- gps_data %>%
+  left_join(temperature_data, 
+            by = "date")
+
+head(gps_data)
+```
+
+```{r}
+speed_temp_analysis <- gps_data %>%
+  group_by(date) %>%
+  summarize(avg_speed = mean(speed, na.rm = TRUE), 
+            avg_temp = first(avg_temp)) %>%
+  ungroup()
+
+library(ggplot2)
+ggplot(speed_temp_analysis, aes(x = avg_temp, 
+                                y = avg_speed)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, 
+              color = "blue") +
+  labs(title = "Average Speed vs. Average Temperature",
+       x = "Average Temperature (°F)",
+       y = "Average Speed (m/s)") +
+  theme_minimal()
+
+correlation <- cor(speed_temp_analysis$avg_speed, 
+                   speed_temp_analysis$avg_temp)
+print(paste("Correlation between speed and temperature:", 
+            round(correlation, 2)))
+
+model <- lm(avg_speed ~ avg_temp, 
+            data = speed_temp_analysis)
+summary(model)
+```
+
+```{r}
+gps_data <- gps_data %>%
+  mutate(temp_category = case_when(
+    avg_temp < 60 ~ "Cold",
+    avg_temp >= 60 & avg_temp < 75 ~ "Moderate",
+    avg_temp >= 75 ~ "Warm"
+  ))
+
+anova_result <- aov(speed ~ temp_category, data = gps_data)
+summary(anova_result)
+```
+
+```{r}
+transit_times <- gps_data %>%
+  filter(status == "Moving") %>%
+  group_by(date) %>%
+  summarize(start_time = min(time), 
+            end_time = max(time)) %>%
+  ungroup()
+
+print("Transit times for each day:")
+print(transit_times)
+
+```
+Step 1: Calculate Most Frequent Start Times for Movement
+Use the GPS data from the first two weeks to find the most frequent or average start time for movement. This would be the earliest time of day that the target begins moving.
+```{r}
+movement_start_summary <- gps_data %>%
+  filter(speed > 0) %>%
+  group_by(date) %>%
+  summarize(start_time = min(time)) %>%
+  ungroup() %>%
+  summarize(frequent_start_time = mean(start_time))
+
+print(movement_start_summary)
+```
+
+Step 2: Identify Frequent Transit Locations
+Identify locations where the target is typically in transit (not stationary for long periods). We can analyze the coordinates recorded during movement and calculate the most common transit points.
+```{r}
+transit_locations <- gps_data %>%
+  filter(speed > 0) %>%
+  group_by(longitude, latitude) %>%
+  summarize(transit_count = n()) %>%
+  arrange(desc(transit_count)) %>%
+  top_n(5, transit_count)
+
+head(transit_locations)
+```
+Step 3: Calculate Average Transit Duration
+Find the typical duration of the target’s movement each day. This will help us determine how long the target might stay in transit, allowing us to target mid-transit times for the bombing attempt.
+```{r}
+movement_duration_summary <- gps_data %>%
+  filter(speed > 0) %>%
+  group_by(date) %>%
+  summarize(movement_duration = max(time) - min(time)) %>%
+  summarize(avg_movement_duration = mean(movement_duration))
+
+print(movement_duration_summary)
+```
+
+
+```{r}
+if (!requireNamespace("fields", quietly = TRUE)) {
+  install.packages("fields")
+}
+library(fields)
+
+calculate_distance <- function(predicted_location, 
+                               actual_location) {
+  dist <- rdist.earth(
+    matrix(predicted_location, ncol = 2), 
+    matrix(actual_location, ncol = 2),
+    miles = FALSE  
+  )
+  return(dist * 1000)  
+}
+```
+
+
+```{r}
+# These libraries are required for data manipulation, date handling, and geographic calculations
+library(dplyr)        # For data manipulation
+library(lubridate)    # For date and time handling
+library(geosphere)    # For geographic calculations (distance and bearing)
+
+# Function to calculate the bomb time based on average transit duration
+# This ensures the bomb is placed at mid-transit while avoiding the first 5 minutes of movement
+calculate_bomb_time <- function(start_time, avg_duration) {
+  mid_transit_time <- start_time + (avg_duration / 2)  # Mid-transit time based on average duration
+  bomb_time <- mid_transit_time + 300  # Offset by 5 minutes to respect the rule on initial movement period
+  return(bomb_time)
+}
+
+# Function to predict the bombing location based on common transit points
+# Uses the centroid of common transit points to approximate the most frequent path
+predict_bomb_location <- function(start_location, common_points) {
+  # If there are multiple common points, calculate the centroid as the bomb location
+  if (nrow(common_points) > 0) {
+    centroid <- colMeans(common_points[, c("longitude", "latitude")])
+  } else {
+    # If no common points are provided, default to start location
+    centroid <- start_location
+  }
+  return(centroid)
+}
+
+# Function to check if the bomb location is near any stationary (safe) zone
+# Returns TRUE if the location is within 5 meters of a stationary zone, otherwise FALSE
+is_near_stationary <- function(bomb_location, stationary_locations, buffer_distance = 5) {
+  # Loop through each stationary location and calculate the distance to the bomb location
+  for (i in 1:nrow(stationary_locations)) {
+    stationary_point <- stationary_locations[i, c("longitude", "latitude")]
+    distance_to_stationary <- distVincentySphere(stationary_point, bomb_location)
+    
+    # If the distance is within the buffer, return TRUE indicating it's too close
+    if (distance_to_stationary <= buffer_distance) {
+      return(TRUE)  # Bomb location is near a stationary location
+    }
+  }
+  return(FALSE)  # Bomb location is not near any stationary location
+}
+
+# Main function to generate the bomb plan based on start location, start time, and other parameters
+# This function outputs the day of the week, time of explosion, longitude, and latitude for bombing
+generate_bomb_plan <- function(start_location, start_time, avg_duration, buffer_distance, time_buffer, stationary_locations, common_points) {
+  # Step 1: Calculate the bomb time based on average transit duration
+  bomb_time <- calculate_bomb_time(start_time, avg_duration)
+  
+  # Step 2: Predict the bomb location using frequent transit points
+  bomb_location <- predict_bomb_location(start_location, common_points)
+  
+  # Check if bomb_location was successfully created
+  if (is.null(bomb_location) || length(bomb_location) != 2) {
+    stop("Error: 'bomb_location' not properly defined.")
+  }
+  
+  # Step 3: Check distance constraint and avoid stationary zones
+  # Calculate the distance from the start location to the predicted bomb location
+  distance_to_target <- distVincentySphere(start_location, bomb_location)
+  
+  # If the bomb location is either too far or too close to a stationary zone, adjust it
+  if (distance_to_target > buffer_distance) {
+    message("Adjusting bomb location to ensure it's within 5 meters of the transit path.")
+    # Adjust location by moving bomb_location within 5 meters from start_location if needed
+    bomb_location <- geosphere::destPoint(start_location, bearing(start_location, bomb_location), buffer_distance)
+  }
+  
+  # Step 4: Ensure the bomb location is not in a stationary (safe) zone
+  if (is_near_stationary(bomb_location, stationary_locations, buffer_distance)) {
+    message("Bomb location is within a safe zone. Adjusting location to avoid stationary areas.")
+    bomb_location <- geosphere::destPoint(start_location, bearing(start_location, bomb_location), buffer_distance)
+  }
+  
+  # Step 5: Confirm bomb time falls within transit period and adjust if necessary
+  if (bomb_time < start_time + minutes(5) || bomb_time > start_time + avg_duration) {
+    message("Adjusting bomb time to be within the active transit period.")
+    bomb_time <- start_time + (avg_duration / 2)  # Recalculate for mid-transit if outside window
+  }
+  
+  # Step 6: Prepare the bomb plan output with day of the week, time of explosion, and coordinates
+  day_of_week <- wday(bomb_time, label = TRUE)
+  return(data.frame(
+    Day_of_Week = day_of_week,
+    Time_of_Explosion = bomb_time,
+    Longitude = bomb_location[1],
+    Latitude = bomb_location[2]
+  ))
+}
+
+# Sample data for testing the algorithm
+# Replace these values with real data if testing with specific GPS logs
+start_location <- c(-114.0003, 46.88678)  # Example starting location
+start_time <- ymd_hms("2024-08-24 17:50:42")  # Example start time
+avg_duration <- 9 * 3600  # Average movement duration in seconds (9 hours)
+buffer_distance <- 5  # 5 meters for bombing precision
+time_buffer <- 10  # 10 seconds for timing precision
+
+# Define stationary and common points for testing purposes
+stationary_locations <- data.frame(
+  longitude = c(-113.9974, -113.9973),
+  latitude = c(46.88527, 46.88590)
+)
+
+# Common transit points, replace with actual points if available
+common_points <- data.frame(
+  longitude = c(-114.0003, -114.0004, -114.0005),
+  latitude = c(46.88678, 46.88690, 46.88695)
+)
+
+# Generate and print the bomb plan
+# This will output the predicted day of the week, time of explosion, and bomb coordinates
+bomb_plan <- generate_bomb_plan(start_location, start_time, avg_duration, buffer_distance, time_buffer, stationary_locations, common_points)
+print(bomb_plan)
+
+```
+
